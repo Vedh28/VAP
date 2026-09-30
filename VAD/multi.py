@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import psutil
 import ollama
@@ -25,7 +26,8 @@ def ping_host(hostname: str) -> str:
         hostname: Domain or IP to test (e.g. '1.1.1.1' or 'google.com')
     """
     try:
-        res = subprocess.check_output(["ping", "-c", "2", hostname], stderr=subprocess.STDOUT, text=True)
+        count_flag = "-n" if os.name == "nt" else "-c"
+        res = subprocess.check_output(["ping", count_flag, "2", hostname], stderr=subprocess.STDOUT, text=True)
         return json.dumps({"status": "success", "raw_output": res.strip()})
     except Exception as err:
         return json.dumps({"status": "error", "message": str(err)})
@@ -75,18 +77,18 @@ NETWORK_TOOLS_SCHEMA = [
 
 def run_agent(agent_name: str, system_prompt: str, user_query: str, tools_schema: list, tools_map: dict):
     print(f"\n--- [{agent_name}] Activated ---")
-    
+
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_query}
     ]
-    
+
     # 1. Ask Qwen3:8b if a tool call is needed
     response = ollama.chat(model=MODEL_NAME, messages=messages, tools=tools_schema)
     messages.append(response["message"])
-    
+
     tool_calls = response["message"].get("tool_calls", [])
-    
+
     if not tool_calls:
         print(f"[{agent_name} Response]:")
         print(response["message"]["content"])
@@ -96,11 +98,11 @@ def run_agent(agent_name: str, system_prompt: str, user_query: str, tools_schema
     for call in tool_calls:
         fn_name = call["function"]["name"]
         fn_args = call["function"]["arguments"]
-        
+
         print(f"  └─ Executing Tool: `{fn_name}` with parameters: {fn_args}")
         if fn_name in tools_map:
             result = tools_map[fn_name](**fn_args)
-            
+
             # Feed tool execution result back into conversation context
             messages.append({
                 "role": "tool",
@@ -121,7 +123,7 @@ def orchestrate_query(user_query: str):
     print(f"\n==========================================")
     print(f"USER QUERY: \"{user_query}\"")
     print(f"==========================================")
-    
+
     router_prompt = f"""You are a query router. Analyze the user prompt and respond with ONLY ONE word:
     - 'SYSTEM' if the query asks about local CPU, disk, memory, or system hardware status.
     - 'NETWORK' if the query asks about pinging, network latency, or internet connectivity.
@@ -129,10 +131,10 @@ def orchestrate_query(user_query: str):
     Query: {user_query}"""
 
     route_res = ollama.chat(
-        model=MODEL_NAME, 
+        model=MODEL_NAME,
         messages=[{"role": "user", "content": router_prompt}]
     )
-    
+
     decision = route_res["message"]["content"].strip().upper()
 
     if "SYSTEM" in decision:
@@ -153,3 +155,13 @@ def orchestrate_query(user_query: str):
         )
     else:
         print("\n[Router]: Request does not match active agent domains.")
+
+
+if __name__ == "__main__":
+    print("Multi-agent system monitor — type 'exit' to quit.")
+    while True:
+        query = input("\nYou: ").strip()
+        if query.lower() == "exit":
+            break
+        if query:
+            orchestrate_query(query)
